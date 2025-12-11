@@ -1,17 +1,26 @@
 import bull from 'bull';
 import * as Logger from 'bunyan';
 import { EventEmitter } from 'events';
-import IoRedis from 'ioredis';
+import IoRedis, { Redis, RedisOptions } from 'ioredis';
 import { register as globalRegister, Registry } from 'prom-client';
 
 import { logger as globalLogger } from './logger';
 import { getJobCompleteStats, getStats, makeGuages, QueueGauges } from './queueGauges';
+
+const TLS_PROTOCOL = 'rediss://';
+const DEFAULT_TLS_OPTIONS = { rejectUnauthorized: false };
 
 export interface MetricCollectorOptions extends Omit<bull.QueueOptions, 'redis'> {
   metricPrefix: string;
   redis: string;
   autoDiscover: boolean;
   logger: Logger;
+  tls?: boolean;
+  host?: string;
+  connectionPort?: number;
+  username?: string;
+  password?: string;
+  db?: number;
 }
 
 export interface QueueData<T = unknown> {
@@ -24,10 +33,12 @@ export class MetricCollector {
 
   private readonly logger: Logger;
 
-  private readonly defaultRedisClient: IoRedis.Redis;
+  private readonly defaultRedisClient: Redis;
   private readonly redisUri: string;
   private readonly bullOpts: Omit<bull.QueueOptions, 'redis'>;
   private readonly queuesByName: Map<string, QueueData<unknown>> = new Map();
+  private readonly useConnectionString: boolean;
+  private readonly redisOptions: RedisOptions;
 
   private get queues(): QueueData<unknown>[] {
     return [...this.queuesByName.values()];
@@ -44,7 +55,34 @@ export class MetricCollector {
   ) {
     const { logger, autoDiscover, redis, metricPrefix, ...bullOpts } = opts;
     this.redisUri = redis;
-    this.defaultRedisClient = new IoRedis(this.redisUri);
+
+    this.useConnectionString = true;
+    // Add TLS options if using a rediss:// URL
+    this.redisOptions = {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false
+    };
+    if (typeof opts.host === 'string' && opts.host.length) {
+      this.useConnectionString = false;
+      this.redisOptions.host = opts.host;
+      this.redisOptions.port = opts.connectionPort;
+      this.redisOptions.password = opts.password;
+      this.redisOptions.db = opts.db;
+
+      if (opts.username) {
+        this.redisOptions.username = opts.username;
+      }
+
+      if (opts.tls) {
+        this.redisOptions.tls = DEFAULT_TLS_OPTIONS;
+      }
+    }
+    else {
+      if (this.redisUri.startsWith(TLS_PROTOCOL)) {
+        this.redisOptions.tls = DEFAULT_TLS_OPTIONS;
+      }
+    }
+    this.defaultRedisClient = this.useConnectionString ? new IoRedis(this.redisUri, this.redisOptions) : new IoRedis(this.redisOptions);
     this.defaultRedisClient.setMaxListeners(32);
     this.bullOpts = bullOpts;
     this.logger = logger || globalLogger;
@@ -52,11 +90,16 @@ export class MetricCollector {
     this.guages = makeGuages(metricPrefix, registers);
   }
 
-  private createClient(_type: 'client' | 'subscriber' | 'bclient', redisOpts?: IoRedis.RedisOptions): IoRedis.Redis {
+  private createClient(_type: 'client' | 'subscriber' | 'bclient', redisOpts?: RedisOptions): Redis {
     if (_type === 'client') {
-      return this.defaultRedisClient!;
+      return this.defaultRedisClient;
     }
-    return new IoRedis(this.redisUri, redisOpts);
+    // Merge any provided options with TLS settings if needed.
+    const options: RedisOptions = redisOpts || {};
+    if (this.redisUri.startsWith('rediss://')) {
+      options.tls = { rejectUnauthorized: false };
+    }
+    return this.useConnectionString ? new IoRedis(this.redisUri, options) : new IoRedis(this.redisOptions);
   }
 
   private addToQueueSet(names: string[]): void {
@@ -135,3 +178,4 @@ export class MetricCollector {
   }
 
 }
+
