@@ -9,3 +9,8 @@ src/**/*.js
 __tests__/**/*.js
 /.venv/
 /__pycache__/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
