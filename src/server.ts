@@ -58,9 +58,15 @@ export async function makeServer(opts: Options): Promise<express.Application> {
   const collector = new MetricCollector(opts._, {
     logger,
     metricPrefix: opts.metricPrefix,
-    redis: opts.url,
+    redis: opts.redisUrl,
     prefix: opts.prefix,
     autoDiscover: opts.autoDiscover,
+    tls: opts.redisTls,
+    host: opts.redisHost,
+    connectionPort: opts.redisConnectionPort,
+    username: opts.redisUsername,
+    password: opts.redisPassword,
+    db: opts.redisDb,
   });
 
   if (opts.autoDiscover) {
@@ -112,7 +118,7 @@ export async function startServer(opts: Options): Promise<{ done: Promise<void> 
   const app = await makeServer(opts);
 
   let server: http.Server;
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     server = app.listen(opts.port, opts.bindAddress, (err: any) => {
       if (err) {
         reject(err);
