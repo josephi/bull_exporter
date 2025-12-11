@@ -12,9 +12,15 @@ export async function printOnce(opts: Options): Promise<void> {
   const collector = new MetricCollector(opts._, {
     logger,
     metricPrefix: opts.metricPrefix,
-    redis: opts.url,
+    redis: opts.redisUrl,
     prefix: opts.prefix,
     autoDiscover: opts.autoDiscover,
+    tls: opts.redisTls,
+    host: opts.redisHost,
+    connectionPort: opts.redisConnectionPort,
+    username: opts.redisUsername,
+    password: opts.redisPassword,
+    db: opts.redisDb,
   });
   if (opts.autoDiscover) {
     await collector.discoverAll();
@@ -44,7 +50,10 @@ if (require.main === module) {
 
   let exitCode = 0;
   main(...args)
-    .catch(() => process.exitCode = exitCode = 1)
+    .catch((err) => {
+      logger.error('Failed to start server', err);
+      process.exitCode = exitCode = 1;
+    })
     .then(() => {
       setTimeout(
         () => {
